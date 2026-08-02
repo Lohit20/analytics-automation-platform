@@ -1,4 +1,5 @@
 import pandas as pd
+import plotly.express as px
 import streamlit as st
 from psycopg2.extras import RealDictCursor
 
@@ -7,6 +8,8 @@ from queries import (
     add_product,
     get_all_products,
     get_categories,
+    get_category_stock_value,
+    get_daily_value_trend,
     get_dynamic_reorder_points,
     get_headline_metrics,
     get_pending_reorders,
@@ -51,8 +54,34 @@ if page == "Overview":
     for i, label in enumerate(labels[3:6]):
         cols[i].metric(label=label, value=metrics[label])
 
-    st.caption("Headline metrics are portfolio-wide; the tables below respect the filters above.")
+    st.caption("Headline metrics are portfolio-wide; the tables and charts below respect the filters above.")
     st.divider()
+
+    st.subheader("Sales & Restock Value Trend (Last 90 Days)")
+    trend_rows = get_daily_value_trend(cursor)
+    if trend_rows:
+        trend_df = pd.DataFrame(trend_rows).astype({"value": "float"})
+        fig = px.line(
+            trend_df,
+            x="date",
+            y="value",
+            color="change_type",
+            title=None,
+            labels={"date": "Date", "value": "Value (£)", "change_type": ""},
+        )
+        st.plotly_chart(fig, width="stretch")
+    else:
+        st.info("No stock movement in the last 90 days.")
+
+    st.subheader("Stock Value by Category")
+    category_rows = get_category_stock_value(cursor, categories_filter, suppliers_filter)
+    if category_rows:
+        category_df = pd.DataFrame(category_rows).astype({"stock_value": "float"})
+        fig = px.pie(category_df, names="category", values="stock_value", hole=0.4)
+        fig.update_traces(textinfo="label+percent")
+        st.plotly_chart(fig, width="stretch")
+    else:
+        st.info("No products match the current filter.")
 
     st.subheader("Supplier Contacts")
     st.dataframe(pd.DataFrame(get_supplier_metrics(cursor)))
@@ -84,6 +113,29 @@ elif page == "Reorder & Supplier Analytics":
     reorder_df = pd.DataFrame(get_dynamic_reorder_points(cursor, categories_filter, suppliers_filter))
     st.dataframe(reorder_df, width="stretch")
 
+    if not reorder_df.empty:
+        top_n = st.slider("Show top N products by gap size", 3, min(20, len(reorder_df)), min(10, len(reorder_df)))
+        chart_df = reorder_df.head(top_n).astype(
+            {"static_reorder_level": "float", "dynamic_reorder_point": "float"}
+        )
+        melted = chart_df.melt(
+            id_vars="product_name",
+            value_vars=["static_reorder_level", "dynamic_reorder_point"],
+            var_name="metric",
+            value_name="units",
+        )
+        fig = px.bar(
+            melted,
+            x="product_name",
+            y="units",
+            color="metric",
+            barmode="group",
+            title="Static vs. Dynamic Reorder Point",
+            labels={"product_name": "Product", "units": "Reorder point (units)", "metric": ""},
+        )
+        fig.update_layout(xaxis_tickangle=-45)
+        st.plotly_chart(fig, width="stretch")
+
     st.divider()
 
     st.header("Supplier Performance")
@@ -95,12 +147,54 @@ elif page == "Reorder & Supplier Analytics":
     st.dataframe(perf_df, width="stretch")
 
     if not perf_df.empty and perf_df["on_time_rate_pct"].notna().any():
-        # psycopg2 returns NUMERIC columns as Decimal; Altair can't infer a
-        # quantitative axis from Decimal and silently falls back to a
-        # nominal (categorical) one, producing a nonsensical chart -- cast
-        # to float before handing off to the chart.
-        chart_df = perf_df.assign(on_time_rate_pct=perf_df["on_time_rate_pct"].astype(float))
-        st.bar_chart(chart_df.set_index("supplier_name")["on_time_rate_pct"])
+        # psycopg2 returns NUMERIC columns as Decimal; Plotly/pandas need
+        # float, not Decimal, for a proper quantitative axis.
+        chart_df = perf_df.astype(
+            {"on_time_rate_pct": "float", "avg_lead_time_days": "float", "sla_days": "float"}
+        )
+        fig = px.bar(
+            chart_df,
+            x="supplier_name",
+            y="on_time_rate_pct",
+            color="on_time_rate_pct",
+            color_continuous_scale="RdYlGn",
+            range_color=[0, 100],
+            hover_data={
+                "avg_lead_time_days": True,
+                "sla_days": True,
+                "completed_reorders": True,
+                "on_time_rate_pct": ":.1f",
+            },
+            title="On-Time Delivery Rate by Supplier",
+            labels={"supplier_name": "Supplier", "on_time_rate_pct": "On-time rate (%)"},
+        )
+        fig.add_hline(y=80, line_dash="dot", annotation_text="80% target", annotation_position="top left")
+        st.plotly_chart(fig, width="stretch")
+
+        st.subheader("Lead Time vs. Reliability")
+        st.caption(
+            "Each point is a supplier: how fast they deliver (x) vs how often they hit "
+            "their own SLA (y). Bubble size is order volume — the suppliers worth the most "
+            "scrutiny are large bubbles that are slow, unreliable, or both."
+        )
+        scatter_df = chart_df.dropna(subset=["on_time_rate_pct"])
+        if not scatter_df.empty:
+            fig2 = px.scatter(
+                scatter_df,
+                x="avg_lead_time_days",
+                y="on_time_rate_pct",
+                size="completed_reorders",
+                color="supplier_name",
+                text="supplier_name",
+                labels={
+                    "avg_lead_time_days": "Avg lead time (days)",
+                    "on_time_rate_pct": "On-time rate (%)",
+                    "completed_reorders": "Completed reorders",
+                },
+            )
+            fig2.update_traces(textposition="top center")
+            fig2.update_yaxes(range=[0, 105])
+            st.plotly_chart(fig2, width="stretch")
 
 elif page == "Operational Tasks":
     task = st.selectbox("Choose a task", ["Add New Product", "Product History", "Place Reorder", "Receive Reorder"])
