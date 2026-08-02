@@ -4,7 +4,7 @@ A PostgreSQL-backed dashboard that flags low-stock products and automates the
 reorder-to-receipt workflow, replacing manual, error-prone reorder tracking
 with a self-serve tool stakeholders can use directly.
 
-**Stack:** Python · SQL (PostgreSQL) · Streamlit
+**Stack:** Python · SQL (PostgreSQL) · Streamlit · Plotly
 
 ## The problem
 
@@ -52,9 +52,28 @@ A dedicated dashboard page built on two views:
 
 - `dynamic_reorder_point` — per product: current stock, static reorder level,
   average daily sales, effective lead time, and the computed dynamic reorder
-  point, sorted by how far it diverges from the static value.
+  point, sorted by how far it diverges from the static value. A grouped bar
+  chart compares static vs. dynamic side by side for the biggest gaps
+  (adjustable via a slider).
 - `supplier_performance` — per supplier: average lead time, completed
-  reorder count, and on-time rate against SLA, with a bar chart.
+  reorder count, and on-time rate against SLA, as a colour-scaled bar chart
+  with an 80% target line, plus a lead-time-vs-reliability scatter (bubble
+  size = order volume) that surfaces which suppliers are worth the most
+  scrutiny at a glance.
+
+## Interactivity
+
+- **Filters** — category and supplier multiselect filters on Overview and
+  Analytics pages drive every table and chart on the page.
+- **Charts, not just tables** — Plotly powers a sales/restock value trend
+  line, a stock-value-by-category donut, the reorder-point comparison and
+  on-time-rate bar charts, and the lead-time-vs-reliability scatter — all
+  with hover tooltips.
+- **Product drill-down** — selecting a product under Operational Tasks →
+  Product History renders its full stock-balance history as an interactive
+  line chart (not just a table), with sale and restock events marked
+  separately, so a stock dip or restock spike is visible at a glance instead
+  of having to read rows.
 
 ## Running it locally
 
@@ -119,3 +138,9 @@ inventory-dashboard/
   computed over a full calendar spine (`generate_series`), not just days
   with a recorded sale — otherwise slow-moving products would look busier
   than they are and the safety-stock buffer would be under-sized.
+- **`Decimal` vs. chart libraries**: `psycopg2` returns `NUMERIC` columns as
+  Python `Decimal`. Both Altair (Streamlit's default chart backend) and
+  Plotly need `float` to infer a quantitative axis — handing them a `Decimal`
+  column silently produces a nonsensical chart (this bit us once during
+  testing: an inverted, mis-scaled axis) rather than an error. Every chart
+  in this app explicitly casts `Decimal` columns to `float` first.
