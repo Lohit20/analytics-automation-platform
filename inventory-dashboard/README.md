@@ -33,6 +33,28 @@ problems, so the fix lives in the database layer, not just the frontend.
 - **Full audit trail** — every stock movement (sale or restock) is logged in
   `stock_entries`; `product_inventory_history` is a view with a running
   balance per product, so any point-in-time stock level is reconstructable.
+- **Dynamic reorder points** — `reorder_level` is normally a number someone
+  set once and forgot about. `dynamic_reorder_point` instead computes it from
+  actual sales velocity (60-day trailing average and variability) times each
+  supplier's real lead time, plus a safety-stock buffer sized for a 95%
+  service level. The dashboard shows this next to the static value so the
+  biggest gaps — the products most likely to be mis-configured — surface
+  first.
+- **Supplier performance scoring** — average lead time and on-time delivery
+  rate per supplier, computed from completed reorders (`reorder_date` to
+  `received_date` in `shipments`) against each supplier's contracted
+  `sla_days`. Turns "trust the supplier's word" into a number backed by
+  actual delivery history.
+
+## Reorder & Supplier Analytics
+
+A dedicated dashboard page built on two views:
+
+- `dynamic_reorder_point` — per product: current stock, static reorder level,
+  average daily sales, effective lead time, and the computed dynamic reorder
+  point, sorted by how far it diverges from the static value.
+- `supplier_performance` — per supplier: average lead time, completed
+  reorder count, and on-time rate against SLA, with a bar chart.
 
 ## Running it locally
 
@@ -64,13 +86,14 @@ inventory-dashboard/
 ├── docker-compose.yml       # local Postgres for dev/testing
 ├── db/
 │   ├── schema.sql           # tables, constraints, indexes, history view
-│   └── procedures.sql       # add_product, place_reorder, mark_reorder_as_received
+│   ├── procedures.sql       # add_product, place_reorder, mark_reorder_as_received
+│   └── analytics_views.sql  # dynamic_reorder_point, supplier_performance
 ├── scripts/
 │   └── seed_data.py         # synthetic suppliers/products/stock-movement generator
 ├── app/
-│   ├── db.py                # connection (env-based config)
+│   ├── database.py          # connection (env-based config)
 │   ├── queries.py           # business-logic query functions
-│   └── main.py               # Streamlit UI (Overview + Operational Tasks)
+│   └── main.py               # Streamlit UI (Overview, Analytics, Operational Tasks)
 └── requirements.txt
 ```
 
@@ -87,3 +110,12 @@ inventory-dashboard/
   correct results, and the double-receive guard was tested directly — a
   second `mark_reorder_as_received` call on an already-received reorder
   raises rather than double-counting stock.
+- The analytics page was verified with Streamlit's `AppTest` framework
+  (programmatically switching pages and checking for exceptions) as well as
+  a manual HTTP/health check, against real seeded data with a realistic
+  spread of supplier lead times so on-time rates actually differ (16.7% to
+  100% in the seeded dataset) rather than being uniformly perfect.
+- `avg_daily_sales` and `stddev_daily_sales` in `product_sales_velocity` are
+  computed over a full calendar spine (`generate_series`), not just days
+  with a recorded sale — otherwise slow-moving products would look busier
+  than they are and the safety-stock buffer would be under-sized.
