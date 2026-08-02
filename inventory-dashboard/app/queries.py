@@ -54,6 +54,24 @@ def get_restock_metrics(cursor):
     return cursor.fetchall()
 
 
+def get_dynamic_reorder_points(cursor):
+    """Products where sales-velocity-driven reorder point diverges from the
+    static reorder_level someone set once -- the ones worth revisiting."""
+    cursor.execute("""
+        SELECT product_name, stock_quantity, static_reorder_level,
+               avg_daily_sales, lead_time_days, dynamic_reorder_point,
+               (dynamic_reorder_point - static_reorder_level) AS delta
+        FROM dynamic_reorder_point
+        ORDER BY ABS(dynamic_reorder_point - static_reorder_level) DESC
+    """)
+    return cursor.fetchall()
+
+
+def get_supplier_performance(cursor):
+    cursor.execute("SELECT * FROM supplier_performance")
+    return cursor.fetchall()
+
+
 def get_products_needing_reorder(cursor):
     cursor.execute("""
         SELECT product_name, stock_quantity, reorder_level
