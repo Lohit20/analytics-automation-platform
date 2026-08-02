@@ -10,6 +10,7 @@ services:
     volumes:
       - ./db/schema.sql:/docker-entrypoint-initdb.d/1_schema.sql
       - ./db/procedures.sql:/docker-entrypoint-initdb.d/2_procedures.sql
+      - ./db/analytics_views.sql:/docker-entrypoint-initdb.d/3_analytics_views.sql
       - pgdata:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U inventory -d inventory"]

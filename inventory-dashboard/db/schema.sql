@@ -5,7 +5,10 @@ CREATE TABLE suppliers (
     supplier_name   TEXT NOT NULL,
     contact_name    TEXT,
     email           TEXT,
-    phone           TEXT
+    phone           TEXT,
+    -- Contracted delivery time in days, used to score actual lead time
+    -- against what the supplier agreed to.
+    sla_days        INTEGER NOT NULL DEFAULT 7 CHECK (sla_days > 0)
 );
 
 CREATE TABLE products (
