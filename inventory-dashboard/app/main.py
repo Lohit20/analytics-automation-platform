@@ -77,7 +77,12 @@ elif page == "Reorder & Supplier Analytics":
     st.dataframe(perf_df, width="stretch")
 
     if not perf_df.empty and perf_df["on_time_rate_pct"].notna().any():
-        st.bar_chart(perf_df.set_index("supplier_name")["on_time_rate_pct"])
+        # psycopg2 returns NUMERIC columns as Decimal; Altair can't infer a
+        # quantitative axis from Decimal and silently falls back to a
+        # nominal (categorical) one, producing a nonsensical chart -- cast
+        # to float before handing off to the chart.
+        chart_df = perf_df.assign(on_time_rate_pct=perf_df["on_time_rate_pct"].astype(float))
+        st.bar_chart(chart_df.set_index("supplier_name")["on_time_rate_pct"])
 
 elif page == "Operational Tasks":
     task = st.selectbox("Choose a task", ["Add New Product", "Product History", "Place Reorder", "Receive Reorder"])
