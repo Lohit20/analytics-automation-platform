@@ -28,7 +28,17 @@ st.title("Inventory and Supply Chain Dashboard")
 db = connect_to_db()
 cursor = db.cursor(cursor_factory=RealDictCursor)
 
+all_categories = get_categories(cursor)
+all_supplier_names = [s["supplier_name"] for s in get_suppliers(cursor)]
+
 if page == "Overview":
+    with st.expander("Filters", expanded=False):
+        col1, col2 = st.columns(2)
+        selected_categories = col1.multiselect("Category", all_categories)
+        selected_suppliers = col2.multiselect("Supplier", all_supplier_names)
+    categories_filter = selected_categories or None
+    suppliers_filter = selected_suppliers or None
+
     st.header("Headline Metrics")
     metrics = get_headline_metrics(cursor)
     labels = list(metrics.keys())
@@ -41,29 +51,37 @@ if page == "Overview":
     for i, label in enumerate(labels[3:6]):
         cols[i].metric(label=label, value=metrics[label])
 
+    st.caption("Headline metrics are portfolio-wide; the tables below respect the filters above.")
     st.divider()
 
     st.subheader("Supplier Contacts")
     st.dataframe(pd.DataFrame(get_supplier_metrics(cursor)))
 
     st.subheader("Stock by Product and Supplier")
-    st.dataframe(pd.DataFrame(get_restock_metrics(cursor)))
+    st.dataframe(pd.DataFrame(get_restock_metrics(cursor, categories_filter, suppliers_filter)))
 
     st.subheader("Products Needing Reorder")
-    needing_reorder = get_products_needing_reorder(cursor)
+    needing_reorder = get_products_needing_reorder(cursor, categories_filter, suppliers_filter)
     if needing_reorder:
         st.dataframe(pd.DataFrame(needing_reorder))
     else:
-        st.info("Nothing below reorder level right now.")
+        st.info("Nothing below reorder level for the current filter.")
 
 elif page == "Reorder & Supplier Analytics":
+    with st.expander("Filters", expanded=False):
+        col1, col2 = st.columns(2)
+        selected_categories = col1.multiselect("Category", all_categories, key="analytics_category")
+        selected_suppliers = col2.multiselect("Supplier", all_supplier_names, key="analytics_supplier")
+    categories_filter = selected_categories or None
+    suppliers_filter = selected_suppliers or None
+
     st.header("Dynamic Reorder Points")
     st.caption(
         "Reorder point computed from actual sales velocity and each supplier's real "
         "lead time, at a 95% service level — compared against the static reorder_level "
         "someone set once. Large gaps are worth revisiting."
     )
-    reorder_df = pd.DataFrame(get_dynamic_reorder_points(cursor))
+    reorder_df = pd.DataFrame(get_dynamic_reorder_points(cursor, categories_filter, suppliers_filter))
     st.dataframe(reorder_df, width="stretch")
 
     st.divider()

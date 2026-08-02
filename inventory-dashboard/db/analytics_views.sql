@@ -77,6 +77,8 @@ CREATE OR REPLACE VIEW dynamic_reorder_point AS
 SELECT
     p.product_id,
     p.product_name,
+    p.category,
+    s.supplier_name,
     p.stock_quantity,
     p.reorder_level AS static_reorder_level,
     ROUND(v.avg_daily_sales, 2) AS avg_daily_sales,
@@ -86,5 +88,6 @@ SELECT
         + (1.65 * COALESCE(v.stddev_daily_sales, 0) * SQRT(COALESCE(lt.avg_lead_time_days, 7)))
     ) AS dynamic_reorder_point
 FROM products p
+JOIN suppliers s ON s.supplier_id = p.supplier_id
 JOIN product_sales_velocity v ON v.product_id = p.product_id
 LEFT JOIN supplier_lead_time lt ON lt.supplier_id = p.supplier_id;

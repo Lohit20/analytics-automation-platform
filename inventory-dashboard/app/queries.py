@@ -45,25 +45,31 @@ def get_supplier_metrics(cursor):
     return cursor.fetchall()
 
 
-def get_restock_metrics(cursor):
-    cursor.execute("""
-        SELECT p.product_name, s.supplier_name, p.stock_quantity, p.reorder_level
+def get_restock_metrics(cursor, categories=None, supplier_names=None):
+    sql = """
+        SELECT p.product_name, p.category, s.supplier_name, p.stock_quantity, p.reorder_level
         FROM products p JOIN suppliers s ON p.supplier_id = s.supplier_id
+        WHERE (%(categories)s IS NULL OR p.category = ANY(%(categories)s))
+          AND (%(suppliers)s IS NULL OR s.supplier_name = ANY(%(suppliers)s))
         ORDER BY p.product_name
-    """)
+    """
+    cursor.execute(sql, {"categories": categories, "suppliers": supplier_names})
     return cursor.fetchall()
 
 
-def get_dynamic_reorder_points(cursor):
+def get_dynamic_reorder_points(cursor, categories=None, supplier_names=None):
     """Products where sales-velocity-driven reorder point diverges from the
     static reorder_level someone set once -- the ones worth revisiting."""
-    cursor.execute("""
-        SELECT product_name, stock_quantity, static_reorder_level,
+    sql = """
+        SELECT product_name, category, supplier_name, stock_quantity, static_reorder_level,
                avg_daily_sales, lead_time_days, dynamic_reorder_point,
                (dynamic_reorder_point - static_reorder_level) AS delta
         FROM dynamic_reorder_point
+        WHERE (%(categories)s IS NULL OR category = ANY(%(categories)s))
+          AND (%(suppliers)s IS NULL OR supplier_name = ANY(%(suppliers)s))
         ORDER BY ABS(dynamic_reorder_point - static_reorder_level) DESC
-    """)
+    """
+    cursor.execute(sql, {"categories": categories, "suppliers": supplier_names})
     return cursor.fetchall()
 
 
@@ -72,12 +78,16 @@ def get_supplier_performance(cursor):
     return cursor.fetchall()
 
 
-def get_products_needing_reorder(cursor):
-    cursor.execute("""
-        SELECT product_name, stock_quantity, reorder_level
-        FROM products WHERE stock_quantity <= reorder_level
-        ORDER BY (reorder_level - stock_quantity) DESC
-    """)
+def get_products_needing_reorder(cursor, categories=None, supplier_names=None):
+    sql = """
+        SELECT p.product_name, p.category, s.supplier_name, p.stock_quantity, p.reorder_level
+        FROM products p JOIN suppliers s ON p.supplier_id = s.supplier_id
+        WHERE p.stock_quantity <= p.reorder_level
+          AND (%(categories)s IS NULL OR p.category = ANY(%(categories)s))
+          AND (%(suppliers)s IS NULL OR s.supplier_name = ANY(%(suppliers)s))
+        ORDER BY (p.reorder_level - p.stock_quantity) DESC
+    """
+    cursor.execute(sql, {"categories": categories, "suppliers": supplier_names})
     return cursor.fetchall()
 
 
