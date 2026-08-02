@@ -2,24 +2,26 @@ import pandas as pd
 import streamlit as st
 from psycopg2.extras import RealDictCursor
 
-from db import connect_to_db
+from database import connect_to_db
 from queries import (
     add_product,
     get_all_products,
     get_categories,
+    get_dynamic_reorder_points,
     get_headline_metrics,
     get_pending_reorders,
     get_product_history,
     get_products_needing_reorder,
     get_restock_metrics,
     get_supplier_metrics,
+    get_supplier_performance,
     get_suppliers,
     mark_reorder_as_received,
     place_reorder,
 )
 
 st.sidebar.title("Inventory Management Dashboard")
-page = st.sidebar.radio("Select Option:", ["Overview", "Operational Tasks"])
+page = st.sidebar.radio("Select Option:", ["Overview", "Reorder & Supplier Analytics", "Operational Tasks"])
 
 st.title("Inventory and Supply Chain Dashboard")
 
@@ -53,6 +55,29 @@ if page == "Overview":
         st.dataframe(pd.DataFrame(needing_reorder))
     else:
         st.info("Nothing below reorder level right now.")
+
+elif page == "Reorder & Supplier Analytics":
+    st.header("Dynamic Reorder Points")
+    st.caption(
+        "Reorder point computed from actual sales velocity and each supplier's real "
+        "lead time, at a 95% service level — compared against the static reorder_level "
+        "someone set once. Large gaps are worth revisiting."
+    )
+    reorder_df = pd.DataFrame(get_dynamic_reorder_points(cursor))
+    st.dataframe(reorder_df, width="stretch")
+
+    st.divider()
+
+    st.header("Supplier Performance")
+    st.caption(
+        "Actual average lead time and on-time delivery rate per supplier, computed from "
+        "completed reorders (reorder date to received date) against each supplier's SLA."
+    )
+    perf_df = pd.DataFrame(get_supplier_performance(cursor))
+    st.dataframe(perf_df, width="stretch")
+
+    if not perf_df.empty and perf_df["on_time_rate_pct"].notna().any():
+        st.bar_chart(perf_df.set_index("supplier_name")["on_time_rate_pct"])
 
 elif page == "Operational Tasks":
     task = st.selectbox("Choose a task", ["Add New Product", "Product History", "Place Reorder", "Receive Reorder"])
