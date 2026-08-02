@@ -240,7 +240,30 @@ elif page == "Operational Tasks":
             product_id = product_ids[product_names.index(selected_name)]
             history = get_product_history(cursor, product_id)
             if history:
-                st.dataframe(pd.DataFrame(history))
+                history_df = pd.DataFrame(history).sort_values("record_date")
+                fig = px.line(
+                    history_df,
+                    x="record_date",
+                    y="running_balance",
+                    markers=True,
+                    title=f"Stock Balance Over Time — {selected_name}",
+                    labels={"record_date": "Date", "running_balance": "Stock on hand"},
+                )
+                sales = history_df[history_df["change_type"] == "Sale"]
+                restocks = history_df[history_df["change_type"] == "Restock"]
+                fig.add_scatter(
+                    x=sales["record_date"], y=sales["running_balance"],
+                    mode="markers", marker=dict(color="crimson", size=8, symbol="triangle-down"),
+                    name="Sale",
+                )
+                fig.add_scatter(
+                    x=restocks["record_date"], y=restocks["running_balance"],
+                    mode="markers", marker=dict(color="seagreen", size=8, symbol="triangle-up"),
+                    name="Restock",
+                )
+                st.plotly_chart(fig, width="stretch")
+
+                st.dataframe(history_df.sort_values("record_date", ascending=False), width="stretch")
             else:
                 st.info("No history for this product.")
 
