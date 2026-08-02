@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+*.pyc
+data/*.csv
+data/*.xlsx
+!data/.gitkeep
+.DS_Store
