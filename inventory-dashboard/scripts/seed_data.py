@@ -27,6 +27,13 @@ SUPPLIERS = [
     ("Brightline Parts", "Sam Osei", "sam@brightlineparts.example", "+44 117 496 0044"),
 ]
 
+# sla_days is the contracted delivery time; (mean_lead, std_lead) is the
+# supplier's *actual* delivery behaviour used to generate believable
+# history -- some suppliers beat their SLA, some don't, so on-time rate
+# actually differentiates them instead of being uniformly 100%.
+SUPPLIER_SLA_DAYS = [7, 5, 10, 6]
+SUPPLIER_LEAD_PROFILE = [(5, 1.5), (7, 2.5), (8, 1.0), (6, 2.0)]
+
 CATEGORIES = {
     "Electronics": ["USB-C Cable 1m", "Wireless Mouse", "27in Monitor", "Mechanical Keyboard", "Webcam 1080p"],
     "Office Supplies": ["A4 Paper Ream", "Stapler", "Whiteboard Markers", "Desk Organiser", "Sticky Notes Pack"],
@@ -45,6 +52,28 @@ def build_products():
             supplier_id = random.randint(1, len(SUPPLIERS))
             products.append((name, category, price, stock, reorder_level, supplier_id))
     return products
+
+
+def build_historical_reorders(product_supplier, n_per_supplier=6):
+    """Completed reorders with realistic lead times, so supplier_performance
+    has enough history to compute a meaningful on-time rate per supplier."""
+    today = dt.date.today()
+    by_supplier = {}
+    for product_id, supplier_id in product_supplier:
+        by_supplier.setdefault(supplier_id, []).append(product_id)
+
+    rows = []  # (product_id, quantity, reorder_date, shipped_date, received_date)
+    for supplier_id, product_ids in by_supplier.items():
+        mean_lead, std_lead = SUPPLIER_LEAD_PROFILE[supplier_id - 1]
+        for _ in range(n_per_supplier):
+            product_id = random.choice(product_ids)
+            lead_time = max(1, round(random.gauss(mean_lead, std_lead)))
+            reorder_date = today - dt.timedelta(days=random.randint(lead_time + 5, 100))
+            received_date = reorder_date + dt.timedelta(days=lead_time)
+            shipped_date = reorder_date + dt.timedelta(days=max(1, lead_time - 2))
+            qty = random.randint(30, 80)
+            rows.append((product_id, qty, reorder_date, shipped_date, received_date))
+    return rows
 
 
 def build_stock_entries(product_ids, days=120):
@@ -71,22 +100,25 @@ def main():
     cur = conn.cursor()
 
     print("Seeding suppliers...")
-    for supplier in SUPPLIERS:
+    for supplier, sla_days in zip(SUPPLIERS, SUPPLIER_SLA_DAYS):
         cur.execute(
-            "INSERT INTO suppliers (supplier_name, contact_name, email, phone) VALUES (%s, %s, %s, %s)",
-            supplier,
+            "INSERT INTO suppliers (supplier_name, contact_name, email, phone, sla_days) VALUES (%s, %s, %s, %s, %s)",
+            supplier + (sla_days,),
         )
 
     print("Seeding products...")
     products = build_products()
     product_ids = []
+    product_supplier = []
     for product in products:
         cur.execute(
             """INSERT INTO products (product_name, category, price, stock_quantity, reorder_level, supplier_id)
                VALUES (%s, %s, %s, %s, %s, %s) RETURNING product_id""",
             product,
         )
-        product_ids.append(cur.fetchone()[0])
+        product_id = cur.fetchone()[0]
+        product_ids.append(product_id)
+        product_supplier.append((product_id, product[-1]))
 
     print("Seeding stock movement history...")
     entries = build_stock_entries(product_ids)
@@ -95,23 +127,35 @@ def main():
         entries,
     )
 
-    print("Seeding a few reorders (mixed pending/received)...")
-    sample_products = random.sample(product_ids, k=min(6, len(product_ids)))
-    for i, product_id in enumerate(sample_products):
-        qty = random.randint(30, 80)
+    print("Seeding historical completed reorders (for supplier lead-time history)...")
+    historical = build_historical_reorders(product_supplier)
+    for product_id, qty, reorder_date, shipped_date, received_date in historical:
         cur.execute(
-            "INSERT INTO reorders (product_id, reorder_quantity, reorder_date, status) VALUES (%s, %s, %s, %s) RETURNING reorder_id",
-            (product_id, qty, dt.date.today() - dt.timedelta(days=random.randint(1, 10)), "Pending"),
+            """INSERT INTO reorders (product_id, reorder_quantity, reorder_date, status)
+               VALUES (%s, %s, %s, 'Received') RETURNING reorder_id""",
+            (product_id, qty, reorder_date),
         )
         reorder_id = cur.fetchone()[0]
-        if i % 2 == 0:
-            cur.execute("CALL mark_reorder_as_received(%s)", (reorder_id,))
+        cur.execute(
+            "INSERT INTO shipments (reorder_id, shipped_date, received_date) VALUES (%s, %s, %s)",
+            (reorder_id, shipped_date, received_date),
+        )
+
+    print("Seeding a few pending reorders for the operational demo...")
+    pending_products = random.sample(product_ids, k=min(4, len(product_ids)))
+    for product_id in pending_products:
+        qty = random.randint(30, 80)
+        cur.execute(
+            "INSERT INTO reorders (product_id, reorder_quantity, reorder_date, status) VALUES (%s, %s, %s, 'Pending')",
+            (product_id, qty, dt.date.today() - dt.timedelta(days=random.randint(1, 5))),
+        )
 
     conn.commit()
     cur.close()
     conn.close()
     print(f"Done. Seeded {len(SUPPLIERS)} suppliers, {len(products)} products, "
-          f"{len(entries)} stock entries, {len(sample_products)} reorders.")
+          f"{len(entries)} stock entries, {len(historical)} historical reorders, "
+          f"{len(pending_products)} pending reorders.")
 
 
 if __name__ == "__main__":
